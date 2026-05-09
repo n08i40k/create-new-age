@@ -42,7 +42,7 @@ import java.util.List;
 
 public class MotorBlockEntity extends GeneratingKineticBlockEntity implements IHaveGoggleInformation {
     private final SimpleEnergyStorage storage;
-    
+
     public boolean needsPower = false;
     private final IMotorVariant variant;
     public final int tier;
@@ -215,6 +215,18 @@ public class MotorBlockEntity extends GeneratingKineticBlockEntity implements IH
         return actualSpeed;
     }
 
+    private void clearGhostKineticInformation() {
+        if (level == null || level.isClientSide || actualSpeed == 0 || hasSource())
+            return;
+
+        if (hasNetwork() && createNetworkId().equals(network))
+            return;
+
+        clearKineticInformation();
+        speed = 0;
+        stress = 0;
+    }
+
     public void updateGeneratedRotation() {
         float speed = getGeneratedSpeed();
         float prevSpeed = this.speed;
@@ -262,11 +274,13 @@ public class MotorBlockEntity extends GeneratingKineticBlockEntity implements IH
             stressMultiplier = extension.getMultiplier();
             extraEnergy = extension.getVariant().getExtraCapacity();
         }
-        
+
         storage.setCapacity(extraEnergy + variant.getMaxCapacity());
         speedBehavior.betweenValidated((int) -variant.getSpeed(), (int) variant.getSpeed());
 
         if (!level.isClientSide()) {
+            clearGhostKineticInformation();
+
             int needed = (int) Math.ceil((variant.getStress() * stressMultiplier
                         * CNAConfig.getServer().motorSUMultiplier.get())
                     * CNAConfig.getServer().suToEnergy.get());
