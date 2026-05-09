@@ -148,7 +148,7 @@ public class ElectricalConnectorRenderer implements BlockEntityRenderer<Abstract
             return;
 
         var targetPos = endConnector.getConnectionPoint().add(Vec3.atLowerCornerOf(endPos));
-        var maxDistance = CNAConfig.getServer().maxWireLength.get() * 2;
+        var maxDistance = CNAConfig.getServer().maxWireLength.get();
 
         renderWire(wireType, poseStack, buffer, originConnector, targetPos, maxDistance);
     }

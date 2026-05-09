@@ -2,6 +2,7 @@ package org.antarcticgardens.cna.content.electricity.connector;
 
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import dev.ryanhcode.sable.companion.SableCompanion;
 import net.createmod.catnip.nbt.NBTHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -22,10 +23,7 @@ import org.antarcticgardens.cna.config.CNAConfig;
 import org.antarcticgardens.cna.content.electricity.network.ElectricalNetwork;
 import org.antarcticgardens.cna.content.electricity.wire.WireType;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public abstract class AbstractElectricalConnector extends SmartBlockEntity {
     private static final int MOVED_CONNECTION_REPAIR_DELAY = 2;
@@ -118,6 +116,35 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
         if (!connectionsInitialized) {
             updateConnections();
             connectionsInitialized = true;
+        }
+
+        if (level == null)
+            return;
+
+        Set<Map.Entry<AbstractElectricalConnector, WireType>> overstretched = new HashSet<>();
+
+        for (var e : connectors.entrySet()) {
+            var d = SableCompanion.INSTANCE.distanceSquaredWithSubLevels(level, e.getKey().getBlockPos().getCenter(), getBlockPos().getCenter());
+            if (d > Math.pow(CNAConfig.getServer().maxWireLength.get() * 1.15, 2))
+                overstretched.add(e);
+        }
+
+        for (var e : overstretched) {
+            var en = e.getKey();
+
+            disconnect(en);
+            en.disconnect(this);
+            en.updateConnections();
+            en.setChanged();
+            en.sendData();
+
+            Containers.dropContents(level, getBlockPos(), NonNullList.of(ItemStack.EMPTY, e.getValue().getDroppedItem()));
+        }
+
+        if (!overstretched.isEmpty()) {
+            updateConnections();
+            setChanged();
+            sendData();
         }
     }
 
