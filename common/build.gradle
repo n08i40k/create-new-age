@@ -18,4 +18,6 @@ dependencies {
 
     modCompileOnly("com.google.code.findbugs:findbugs:3.0.1")
     annotationProcessor(implementation("io.github.llamalad7:mixinextras-common:0.4.1"))
+
+    api("dev.ryanhcode.sable-companion:sable-companion-common-${minecraftVersion}:${project.sableCompanionVersion}")
 }

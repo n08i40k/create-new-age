@@ -53,3 +53,10 @@ config="create_new_age-common.mixins.json"
     versionRange="[${cctVersion},)"
     ordering="NONE"
     side="BOTH"
+
+[[dependencies.create_new_age]]
+    modId="sablecompanion"
+    type="optional"
+    versionRange="[${sableCompanionVersion},)"
+    ordering="AFTER"
+    side="BOTH"

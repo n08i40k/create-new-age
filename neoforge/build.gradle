@@ -25,19 +25,22 @@ dependencies {
         // Required to be able to run CC:Tweaked
         forgeRuntimeLibrary("cc.tweaked:cobalt:0.9.7")
     }
+
+    include(api("dev.ryanhcode.sable-companion:sable-companion-common-${minecraftVersion}:[${project.sableCompanionVersion},)"))
 }
 
 processResources {
     from(project(":common").sourceSets.main.resources)
 
     var replaceProperties = [
-            "version"         : version.replaceAll("\\+.*-mc", "\\+mc"),
-            "minecraftVersion": minecraftVersion,
-            "neoforgeVersion" : neoforgeVersion,
-            "eslVersion"      : eslVersion,
-            "createVersion"   : createVersionShort,
-            "cctVersion"      : cctVersion,
-            "objLoader"       : objLoader,
+            "version"              : version.replaceAll("\\+.*-mc", "\\+mc"),
+            "minecraftVersion"     : minecraftVersion,
+            "neoforgeVersion"      : neoforgeVersion,
+            "eslVersion"           : eslVersion,
+            "createVersion"        : createVersionShort,
+            "cctVersion"           : cctVersion,
+            "sableCompanionVersion": sableCompanionVersion,
+            "objLoader"            : objLoader,
     ]
 
     inputs.properties replaceProperties

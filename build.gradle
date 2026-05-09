@@ -50,6 +50,20 @@ subprojects {
                 includeGroup("cc.tweaked")
             }
         }
+
+        // Sable
+        exclusiveContent {
+            forRepository {
+                maven {
+                    url = "https://maven.ryanhcode.dev/releases"
+                    name = "RyanHCode Maven"
+                }
+            }
+            filter {
+                includeGroup("dev.ryanhcode.sable")
+                includeGroup("dev.ryanhcode.sable-companion")
+            }
+        }
     }
     
     dependencies {
