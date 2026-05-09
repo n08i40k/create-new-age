@@ -1,6 +1,7 @@
 package org.antarcticgardens.cna.content.electricity.network;
 
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.antarcticgardens.cna.content.electricity.connector.AbstractElectricalConnector;
@@ -126,7 +127,14 @@ public class ElectricalNetwork {
 
             if (insertedThroughThisPath > 0) {
                 BlockEntity be = to.getValue().entity();
+
                 be.setChanged();
+
+                try {
+                    if (be.getLevel() instanceof ServerLevel serverLevel)
+                        serverLevel.getChunkSource().blockChanged(be.getBlockPos());
+                } catch (UnsupportedOperationException ignore) {
+                }
             } // TODO: Move to final commit?
 
             inserted += insertedThroughThisPath;

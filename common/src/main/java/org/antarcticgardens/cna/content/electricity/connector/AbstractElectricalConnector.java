@@ -4,10 +4,7 @@ import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.NonNullList;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
@@ -124,10 +121,18 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
         Set<Map.Entry<AbstractElectricalConnector, WireType>> overstretched = new HashSet<>();
 
         for (var e : connectors.entrySet()) {
-            var d = SableCompanion.INSTANCE.distanceSquaredWithSubLevels(level, e.getKey().getBlockPos().getCenter(), getBlockPos().getCenter());
-            if (d > Math.pow(CNAConfig.getServer().maxWireLength.get() * 1.15, 2))
+            var originProjPos = SableCompanion.INSTANCE.projectOutOfSubLevel(level, (Position) this.getBlockPos().getCenter());
+            var targetProjPos = SableCompanion.INSTANCE.projectOutOfSubLevel(level, (Position) e.getKey().getBlockPos().getCenter());
+
+            if (SableCompanion.INSTANCE.isInPlotGrid(level, originProjPos)
+                    || SableCompanion.INSTANCE.isInPlotGrid(level, targetProjPos))
+                continue;
+
+            var d = originProjPos.distanceTo(targetProjPos);
+            if (d > CNAConfig.getServer().maxWireLength.get() * 1.15)
                 overstretched.add(e);
         }
+
 
         for (var e : overstretched) {
             var en = e.getKey();
@@ -136,7 +141,13 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
             en.disconnect(this);
             en.updateConnections();
             en.setChanged();
-            en.sendData();
+
+            // "Cannot change blocks in nonexistent plot holder"
+            // Workaround until sable-companion gets API for checking plot existing
+            try {
+                en.sendData();
+            } catch (UnsupportedOperationException ignore) {
+            }
 
             Containers.dropContents(level, getBlockPos(), NonNullList.of(ItemStack.EMPTY, e.getValue().getDroppedItem()));
         }
@@ -144,7 +155,11 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
         if (!overstretched.isEmpty()) {
             updateConnections();
             setChanged();
-            sendData();
+
+            try {
+                sendData();
+            } catch (UnsupportedOperationException ignore) {
+            }
         }
     }
 
