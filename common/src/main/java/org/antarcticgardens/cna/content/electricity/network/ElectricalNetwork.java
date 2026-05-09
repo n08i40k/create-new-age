@@ -1,10 +1,8 @@
 package org.antarcticgardens.cna.content.electricity.network;
 
 import net.minecraft.core.Direction;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.antarcticgardens.cna.content.electricity.connector.AbstractElectricalConnector;
 import org.antarcticgardens.cna.content.electricity.connector.ElectricalConnectorBlock;
 import org.antarcticgardens.esl.energy.EnergyStorage;
@@ -128,10 +126,7 @@ public class ElectricalNetwork {
 
             if (insertedThroughThisPath > 0) {
                 BlockEntity be = to.getValue().entity();
-
                 be.setChanged();
-                if (be.getLevel() instanceof ServerLevel serverLevel)
-                    serverLevel.getChunkSource().blockChanged(be.getBlockPos());
             } // TODO: Move to final commit?
 
             inserted += insertedThroughThisPath;
