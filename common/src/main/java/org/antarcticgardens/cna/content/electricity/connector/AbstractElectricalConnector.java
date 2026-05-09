@@ -18,6 +18,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.antarcticgardens.cna.config.CNAConfig;
 import org.antarcticgardens.cna.content.electricity.network.ElectricalNetwork;
 import org.antarcticgardens.cna.content.electricity.wire.WireType;
 
@@ -27,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 
 public abstract class AbstractElectricalConnector extends SmartBlockEntity {
+    private static final int MOVED_CONNECTION_REPAIR_DELAY = 2;
+
     protected final Map<AbstractElectricalConnector, WireType> connectors = new HashMap<>();
     protected final Map<BlockPos, WireType> connectorPositions = new HashMap<>();
 
@@ -34,6 +37,8 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
 
     protected boolean connectionsInitialized = false;
     boolean needsInstanceUpdate = true;
+    private BlockPos positionBeforeMove;
+    private int movedConnectionRepairDelay;
 
     public AbstractElectricalConnector(BlockEntityType<?> type, BlockPos pos, BlockState blockState) {
         super(type, pos, blockState);
@@ -55,6 +60,7 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
         }
 
         tag.put("connections", list);
+        tag.put("connectorPosition", NBTHelper.writeVec3i(getBlockPos()));
         super.write(tag, registries, clientPacket);
     }
 
@@ -62,6 +68,16 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
     protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         ListTag list = tag.getList("connections", Tag.TAG_COMPOUND);
         connectorPositions.clear();
+        positionBeforeMove = null;
+        movedConnectionRepairDelay = 0;
+
+        if (tag.contains("connectorPosition")) {
+            BlockPos savedPosition = new BlockPos(NBTHelper.readVec3i((ListTag) tag.get("connectorPosition")));
+            if (!savedPosition.equals(getBlockPos())) {
+                positionBeforeMove = savedPosition;
+                scheduleMovedConnectionRepair(MOVED_CONNECTION_REPAIR_DELAY);
+            }
+        }
 
         for (Tag listTag : list.toArray(new Tag[0])) {
             if (listTag instanceof CompoundTag ct && ct.contains("position") && ct.contains("wire")) {
@@ -92,8 +108,12 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
     public abstract Direction getFacing();
 
     protected void serverTick() {
-        if (network == null)
-            setNetwork(new ElectricalNetwork(this));
+        if (positionBeforeMove != null && movedConnectionRepairDelay > 0) {
+            movedConnectionRepairDelay--;
+            return;
+        }
+
+        ensureNetwork();
 
         if (!connectionsInitialized) {
             updateConnections();
@@ -108,12 +128,118 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
     }
 
     private void updateConnections() {
+        Map<BlockPos, WireType> resolvedPositions = new HashMap<>();
+
         for (Map.Entry<BlockPos, WireType> e : connectorPositions.entrySet()) {
-            if (getLevel().getBlockEntity(e.getKey()) instanceof AbstractElectricalConnector connector)
-                connect(connector, e.getValue());
+            BlockPos connectionPos = resolveMovedConnection(e.getKey());
+            resolvedPositions.put(connectionPos, e.getValue());
         }
 
+        if (!resolvedPositions.equals(connectorPositions)) {
+            connectorPositions.clear();
+            connectorPositions.putAll(resolvedPositions);
+            setChanged();
+        }
+
+        for (Map.Entry<BlockPos, WireType> e : resolvedPositions.entrySet()) {
+            BlockPos connectionPos = e.getKey();
+            if (getLevel().getBlockEntity(connectionPos) instanceof AbstractElectricalConnector connector) {
+                if (positionBeforeMove != null)
+                    connector.replaceConnectionPosition(positionBeforeMove, getBlockPos());
+
+                connect(connector, e.getValue());
+            }
+        }
+
+        positionBeforeMove = null;
+        movedConnectionRepairDelay = 0;
         needsInstanceUpdate = true;
+    }
+
+    private BlockPos resolveMovedConnection(BlockPos pos) {
+        if (getLevel().getBlockEntity(pos) instanceof AbstractElectricalConnector)
+            return pos;
+
+        if (positionBeforeMove == null)
+            return pos;
+
+        BlockPos movedConnectorPos = findMovedConnector(pos);
+        if (movedConnectorPos != null)
+            return movedConnectorPos;
+
+        BlockPos delta = getBlockPos().subtract(positionBeforeMove);
+        if (delta.equals(BlockPos.ZERO))
+            return pos;
+
+        BlockPos movedPos = pos.offset(delta);
+        if (getLevel().getBlockEntity(movedPos) instanceof AbstractElectricalConnector)
+            return movedPos;
+
+        return pos;
+    }
+
+    void runScheduledConnectionRepair() {
+        if (level == null || level.isClientSide || positionBeforeMove == null)
+            return;
+
+        movedConnectionRepairDelay = 0;
+
+        connectors.clear();
+        connectionsInitialized = false;
+        ensureNetwork();
+        updateConnections();
+        connectionsInitialized = true;
+    }
+
+    private void scheduleMovedConnectionRepair(int delay) {
+        movedConnectionRepairDelay = Math.max(movedConnectionRepairDelay, delay);
+        connectionsInitialized = false;
+
+        if (level != null && !level.isClientSide)
+            level.scheduleTick(getBlockPos(), getBlockState().getBlock(), delay);
+    }
+
+    private void ensureNetwork() {
+        if (network == null)
+            setNetwork(new ElectricalNetwork(this));
+    }
+
+    private BlockPos findMovedConnector(BlockPos oldPos) {
+        if (level == null || positionBeforeMove == null)
+            return null;
+
+        int range = Math.max(1, CNAConfig.getServer().maxWireLength.get());
+        BlockPos min = getBlockPos().offset(-range, -range, -range);
+        BlockPos max = getBlockPos().offset(range, range, range);
+
+        for (BlockPos candidate : BlockPos.betweenClosed(min, max)) {
+            if (level.getBlockEntity(candidate) instanceof AbstractElectricalConnector connector
+                    && oldPos.equals(connector.positionBeforeMove))
+                return candidate.immutable();
+        }
+
+        return null;
+    }
+
+    public void replaceConnectionPosition(BlockPos oldPos, BlockPos newPos) {
+        if (oldPos.equals(newPos))
+            return;
+
+        WireType wireType = connectorPositions.remove(oldPos);
+        if (wireType == null)
+            return;
+
+        connectorPositions.put(newPos, wireType);
+        connectors.clear();
+        connectionsInitialized = false;
+        needsInstanceUpdate = true;
+
+        if (network != null)
+            network.destroy();
+
+        setChanged();
+        if (level instanceof ServerLevel serverLevel)
+            serverLevel.getChunkSource().blockChanged(getBlockPos());
     }
 
     public void remove(Level level) {
@@ -142,6 +268,7 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
         setChanged();
 
         if (level instanceof ServerLevel serverLevel) {
+            ensureNetwork();
             network.addNode(entity);
 
             serverLevel.getChunkSource().blockChanged(entity.getBlockPos());
