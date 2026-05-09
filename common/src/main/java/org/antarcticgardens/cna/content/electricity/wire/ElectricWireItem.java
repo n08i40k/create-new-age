@@ -1,11 +1,12 @@
 package org.antarcticgardens.cna.content.electricity.wire;
 
 import com.simibubi.create.foundation.utility.CreateLang;
+import dev.ryanhcode.sable.companion.SableCompanion;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Position;
 import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
@@ -17,6 +18,7 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.phys.Vec3;
 import org.antarcticgardens.cna.config.CNAConfig;
 import org.antarcticgardens.cna.content.electricity.connector.AbstractElectricalConnector;
 import org.jetbrains.annotations.NotNull;
@@ -90,23 +92,31 @@ public class ElectricWireItem extends Item {
         BlockPos boundToPos = getBoundConnector(context.getItemInHand());
 
         if (clickedEntity instanceof AbstractElectricalConnector clickedConnector) {
+            Player player = context.getPlayer();
+
+            if (player == null)
+                return InteractionResult.SUCCESS;
+
             if (boundToPos == null) {
                 setBoundConnector(context.getItemInHand(), clickedConnector);
-                playBoundSound(context.getPlayer());
+                playBoundSound(player);
                 return InteractionResult.SUCCESS;
             } else {
                 BlockPos clickedPos = clickedConnector.getBlockPos();
                 int maxLength = CNAConfig.getServer().maxWireLength.get();
 
+                Vec3 boundToPosProj = SableCompanion.INSTANCE.projectOutOfSubLevel(context.getLevel(), (Position) boundToPos.getCenter());
+                Vec3 clickedPosProj = SableCompanion.INSTANCE.projectOutOfSubLevel(context.getLevel(), (Position) clickedPos.getCenter());
+
                 if (boundToPos.equals(clickedPos)) {
-                    context.getPlayer().displayClientMessage(Component.translatable("item.create_new_age.wire.message.self_connect"), true);
+                    player.displayClientMessage(Component.translatable("item.create_new_age.wire.message.self_connect"), true);
                     context.getItemInHand().remove(BOUND_TO);
                     return InteractionResult.FAIL;
-                } else if (clickedPos.distSqr(boundToPos) > Mth.square(maxLength)) {
-                    context.getPlayer().displayClientMessage(Component.translatable("item.create_new_age.wire.message.too_far", maxLength), true);
+                } else if (boundToPosProj.distanceTo(clickedPosProj) > maxLength) {
+                    player.displayClientMessage(Component.translatable("item.create_new_age.wire.message.too_far", maxLength), true);
                     return InteractionResult.FAIL;
                 } else if (clickedConnector.isConnected(boundToPos)) {
-                    context.getPlayer().displayClientMessage(Component.translatable("item.create_new_age.wire.message.already_connected"), true);
+                    player.displayClientMessage(Component.translatable("item.create_new_age.wire.message.already_connected"), true);
                     context.getItemInHand().remove(BOUND_TO);
                     return InteractionResult.FAIL;
                 }
@@ -117,12 +127,12 @@ public class ElectricWireItem extends Item {
                     context.getItemInHand().remove(BOUND_TO);
                     boundToConnector.connect(clickedConnector, wireType);
 
-                    if (!context.getPlayer().isCreative())
+                    if (!player.isCreative())
                         context.getItemInHand().shrink(1);
 
-                    playBoundSound(context.getPlayer());
+                    playBoundSound(player);
 
-                    context.getPlayer().displayClientMessage(Component.translatable("item.create_new_age.wire.message.connected"), true);
+                    player.displayClientMessage(Component.translatable("item.create_new_age.wire.message.connected"), true);
 
                     return InteractionResult.CONSUME;
                 } else
