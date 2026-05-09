@@ -178,19 +178,6 @@ public abstract class AbstractElectricalConnector extends SmartBlockEntity {
         return pos;
     }
 
-    void runScheduledConnectionRepair() {
-        if (level == null || level.isClientSide || positionBeforeMove == null)
-            return;
-
-        movedConnectionRepairDelay = 0;
-
-        connectors.clear();
-        connectionsInitialized = false;
-        ensureNetwork();
-        updateConnections();
-        connectionsInitialized = true;
-    }
-
     private void scheduleMovedConnectionRepair(int delay) {
         movedConnectionRepairDelay = Math.max(movedConnectionRepairDelay, delay);
         connectionsInitialized = false;
