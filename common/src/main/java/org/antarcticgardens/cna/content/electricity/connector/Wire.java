@@ -8,20 +8,19 @@ import java.util.*;
 
 public class Wire {
     public static final float SAG_FACTOR = 0.9f;
-    private static final Vector3f GLOBAL_UP = new Vector3f(0.0f, 1.0f, 0.0f);
-    
+
     private final List<Pair<WireSection, Float>> sections = new ArrayList<>();
     
     private final Vector3f direction;
     private final Vector3f up;
     private final float sectionLength;
     
-    public Wire(Vector3f direction, float distance, int sectionsAmount) {
+    public Wire(Vector3f direction, float distance, int sectionsAmount, Vector3f globalUp) {
         this.direction = direction;
-        up = calculateUp(direction);
+        up = calculateUp(direction, globalUp);
         sectionLength = distance / sectionsAmount;
         
-        float catenaryScalar = new Vector3f(up).mul(GLOBAL_UP).length();
+        float catenaryScalar = new Vector3f(up).mul(globalUp).length();
         float lastCatenary = 0.0f;
         for (int i = 1; i <= sectionsAmount; i++) {
             float catenary = catenary(i, distance, sectionsAmount) * catenaryScalar;
@@ -32,8 +31,8 @@ public class Wire {
         }
     }
 
-    private Vector3f calculateUp(Vector3f direction) {
-        Vector3f right = new Vector3f(direction).cross(GLOBAL_UP);
+    private Vector3f calculateUp(Vector3f direction, Vector3f dimensionalUp) {
+        Vector3f right = new Vector3f(direction).cross(dimensionalUp);
         if (right.equals(new Vector3f(0.0f), 0.01f))
             return new Vector3f(1.0f, 0.0f, 0.0f);
         return right.normalize().cross(direction).normalize();

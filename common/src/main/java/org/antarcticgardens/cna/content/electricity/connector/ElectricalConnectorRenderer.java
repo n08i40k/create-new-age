@@ -2,6 +2,9 @@ package org.antarcticgardens.cna.content.electricity.connector;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
+import dev.ryanhcode.sable.companion.math.Pose3dc;
 import net.createmod.catnip.data.Pair;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -10,6 +13,7 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Position;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
@@ -24,6 +28,7 @@ import org.antarcticgardens.cna.CreateNewAge;
 import org.antarcticgardens.cna.config.CNAConfig;
 import org.antarcticgardens.cna.content.electricity.wire.ElectricWireItem;
 import org.antarcticgardens.cna.content.electricity.wire.WireType;
+import org.antarcticgardens.cna.util.BlockPosUtil;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
@@ -62,45 +67,70 @@ public class ElectricalConnectorRenderer implements BlockEntityRenderer<Abstract
         return false;
     }
 
-    public void renderConnection(BlockPos pos, BlockPos endPos, WireType wireType, PoseStack poseStack, MultiBufferSource buffer, Level level){
-        if(!shouldRenderConnection(pos, endPos)){
+    private static void renderWire(WireType type, PoseStack poseStack, MultiBufferSource buffer, AbstractElectricalConnector origin, Position targetPos, float maxDistance) {
+        var level = origin.getLevel();
+
+        if (level == null)
             return;
+
+        var originPos = BlockPosUtil.toVec3(origin.getBlockPos()).add(origin.getConnectionPoint());
+        var middlePos = origin.getConnectionPoint().toVector3f();
+
+        // project vectors
+        var originProjPos = SableCompanion.INSTANCE.projectOutOfSubLevel(level, (Position) originPos);
+        var targetProjPos = SableCompanion.INSTANCE.projectOutOfSubLevel(level, targetPos);
+
+        float distance = (float) originProjPos.distanceTo(targetProjPos);
+
+        if (distance >= 1_000) // hardcoded safe limit
+            return;
+
+        var originProjBlockPos = SableCompanion.INSTANCE
+                .projectOutOfSubLevel(level, (Position) origin.getBlockPos().getCenter())
+                .toVector3f();
+
+        Vector3f direction = targetProjPos.subtract(originProjPos).normalize().toVector3f();
+        Vector3f directionProj = direction;
+
+        Vector3f up = new Vector3f(0.0f, 1.0f, 0.0f);
+        Vector3f upProj = up;
+
+        // instanceof has built-in nullability check, so I used it only for inlining sublevel variable
+        if (SableCompanion.INSTANCE.getContaining(origin) instanceof SubLevelAccess subLevelAccess) {
+            Pose3dc pose3dc = subLevelAccess.logicalPose();
+
+            directionProj = pose3dc.transformNormalInverse(new Vec3(direction)).toVector3f();
+            upProj = pose3dc.transformNormalInverse(new Vec3(up)).toVector3f();
         }
 
-        ResourceLocation texture = wireType.getTextureLocation();
-
-        var originConnectorPreCast = level.getBlockEntity(pos);
-        var endConnectorPreCast = level.getBlockEntity(endPos);
-        if (!(originConnectorPreCast instanceof AbstractElectricalConnector originConnector) ||
-                !(endConnectorPreCast instanceof AbstractElectricalConnector endConnector)) {return;}
-
-        var originPoint = originConnector.getConnectionPoint().add(Vec3.atLowerCornerOf(pos));
-        var endPoint = endConnector.getConnectionPoint().add(Vec3.atLowerCornerOf(endPos));
-
-        double distance = pos.getCenter().distanceTo(endPoint);
         int sections = (int) Math.ceil(distance * CNAConfig.getClient().wireSectionsPerMeter.get());
-        Vector3f direction = endPoint.subtract(originPoint).normalize().toVector3f();
 
-        Wire wire = new Wire(direction, (float) distance, sections);
+        Wire wire = new Wire(directionProj, distance, sections, upProj);
+
+        var texture = distance >= maxDistance
+                ? ResourceLocation.fromNamespaceAndPath(CreateNewAge.MOD_ID, "textures/wire/red.png")
+                : type.getTextureLocation();
+
         VertexConsumer consumer = buffer.getBuffer(CNARenderTypes.wire(texture));
 
         poseStack.pushPose();
-        var midPoint = originConnector.getConnectionPoint();
-        poseStack.translate(midPoint.x(), midPoint.y(), midPoint.z());
+        poseStack.translate(middlePos.x(), middlePos.y(), middlePos.z());
         poseStack.mulPose(new Matrix4f().rotateTowards(wire.getDirection(), wire.getUp()));
 
         for (int i = 0; i < wire.getSections().size(); i++) {
-            Pair<WireSection, Float> pair = wire.getSections().get(i);
+            Pair<WireSection, Float> sectionWithOffset = wire.getSections().get(i);
+            var section = sectionWithOffset.getFirst();
+            float yOffset = sectionWithOffset.getSecond();
 
             float sectionOffset = wire.getSectionLength() * i;
-            Vector3f lightPos = pos.getCenter().toVector3f()
-                    .add(wire.getDirection().mul(sectionOffset))
-                    .add(wire.getUp().mul(pair.getSecond()));
+            Vector3f lightPos = originProjBlockPos
+                    .add(direction.mul(sectionOffset))
+                    .add(up.mul(yOffset));
             BlockPos lightBlockPos = BlockPos.containing(new Vec3(lightPos));
             int block = level.getBrightness(LightLayer.BLOCK, lightBlockPos);
             int sky = level.getBrightness(LightLayer.SKY, lightBlockPos);
 
-            pair.getFirst().render(consumer, poseStack, LightTexture.pack(block, sky), pair.getSecond());
+            section.render(consumer, poseStack, LightTexture.pack(block, sky), yOffset);
 
             poseStack.translate(0.0f, 0.0f, wire.getSectionLength());
         }
@@ -108,8 +138,24 @@ public class ElectricalConnectorRenderer implements BlockEntityRenderer<Abstract
         poseStack.popPose();
     }
 
+    public void renderConnection(BlockPos pos, BlockPos endPos, WireType wireType, PoseStack poseStack, MultiBufferSource buffer, Level level) {
+        if (!shouldRenderConnection(pos, endPos)) {
+            return;
+        }
+
+        if (!(level.getBlockEntity(pos) instanceof AbstractElectricalConnector originConnector)
+                || !(level.getBlockEntity(endPos) instanceof AbstractElectricalConnector endConnector))
+            return;
+
+        var targetPos = endConnector.getConnectionPoint().add(Vec3.atLowerCornerOf(endPos));
+        var maxDistance = CNAConfig.getServer().maxWireLength.get() * 2;
+
+        renderWire(wireType, poseStack, buffer, originConnector, targetPos, maxDistance);
+    }
+
     public void renderHand(AbstractElectricalConnector blockEntity, float partialTick, PoseStack poseStack, MultiBufferSource buffer) {
         LocalPlayer player = Minecraft.getInstance().player;
+
         if (player != null && Minecraft.getInstance().options.getCameraType().isFirstPerson()) {
             ItemStack itemInHand = player.getMainHandItem();
 
@@ -117,90 +163,36 @@ public class ElectricalConnectorRenderer implements BlockEntityRenderer<Abstract
                 itemInHand = player.getOffhandItem();
 
             if (itemInHand.getItem() instanceof ElectricWireItem wireItem) {
-                var midPoint = blockEntity.getConnectionPoint();
-                BlockPos bound = wireItem.getBoundConnector(itemInHand);
+                Level level = player.level();
 
-                if (bound != null && bound.equals(blockEntity.getBlockPos())) {
-                    Vec3 eyePos = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
-                    Vec3 endPos = eyePos.add(player.getViewVector(partialTick).normalize().scale(2.0f));
+                BlockPos originBoundPos = wireItem.getBoundConnector(itemInHand);
 
-                    HitResult hit = pickBlockFromPos(blockEntity.getLevel(), eyePos,
+                if (originBoundPos != null && originBoundPos.equals(blockEntity.getBlockPos())) {
+                    Vec3 playerEyePos = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
+                    Vec3 targetPos = playerEyePos.add(player.getViewVector(partialTick).normalize().scale(2.0f));
+
+                    HitResult hit = pickBlockFromPos(blockEntity.getLevel(), playerEyePos,
                             player.getViewVector(partialTick), Minecraft.getInstance().player.blockInteractionRange());
 
                     if (hit instanceof BlockHitResult blockHit) {
-                        Vec3 vec = eyePos.add(blockHit.getLocation().subtract(eyePos).scale(0.9f));
+                        Vec3 vec = playerEyePos.add(blockHit.getLocation().subtract(playerEyePos).scale(0.9f));
 
-                        if (eyePos.distanceTo(endPos) > eyePos.distanceTo(vec))
-                            endPos = vec;
+                        if (playerEyePos.distanceTo(targetPos) > playerEyePos.distanceTo(vec))
+                            targetPos = vec;
                     }
-
-                    BlockPos pos = blockEntity.getBlockPos();
-
-                    Vector3f to = new Vector3f(
-                            (float) (endPos.x - pos.getX() - midPoint.x),
-                            (float) (endPos.y - pos.getY() - midPoint.y),
-                            (float) (endPos.z - pos.getZ() - midPoint.z)
-                    );
-
-                    var originPoint = blockEntity.getConnectionPoint().add(Vec3.atLowerCornerOf(bound));
-
-                    double distance = endPos.distanceTo(originPoint);
-                    int maxDistance = CNAConfig.getServer().maxWireLength.get();
-
-                    if (distance > maxDistance * 2)
-                        return;
 
                     if (Minecraft.getInstance().gameMode != null && hit instanceof BlockHitResult blockHit) {
                         if (blockEntity.getLevel().getBlockEntity(blockHit.getBlockPos()) instanceof AbstractElectricalConnector connector) {
                             if (connector.isConnected(blockEntity.getBlockPos()))
                                 return;
 
-                            var point = connector.getConnectionPoint();
-
-                            to = new Vector3f(
-                                    blockHit.getBlockPos().getX() - pos.getX() + (float)point.x() - (float)midPoint.x(),
-                                    blockHit.getBlockPos().getY() - pos.getY() + (float)point.y() - (float)midPoint.y(),
-                                    blockHit.getBlockPos().getZ() - pos.getZ() + (float)point.z() - (float)midPoint.z()
-                            );
-
-                            distance = connector.getBlockPos().getCenter().distanceTo(blockEntity.getBlockPos().getCenter());
+                            targetPos = SableCompanion.INSTANCE.projectOutOfSubLevel(level, (Position) BlockPosUtil.toVec3(connector.getBlockPos()).add(connector.getConnectionPoint()));
                         }
                     }
 
-                    ResourceLocation texture = wireItem.getWireType().getTextureLocation();
+                    var maxDistance = CNAConfig.getServer().maxWireLength.get() * 2;
 
-                    if (distance >= maxDistance) {
-                        texture = ResourceLocation.fromNamespaceAndPath(CreateNewAge.MOD_ID, "textures/wire/red.png");
-                    }
-
-                    int sections = (int) Math.ceil(distance * CNAConfig.getClient().wireSectionsPerMeter.get());
-
-                    Vector3f direction = new Vector3f(to).normalize();
-
-                    Wire wire = new Wire(direction, (float) distance, sections);
-                    VertexConsumer consumer = buffer.getBuffer(CNARenderTypes.wire(texture));
-
-                    poseStack.pushPose();
-                    poseStack.translate(midPoint.x(), midPoint.y(), midPoint.z());
-                    poseStack.mulPose(new Matrix4f().rotateTowards(wire.getDirection(), wire.getUp()));
-
-                    for (int i = 0; i < wire.getSections().size(); i++) {
-                        Pair<WireSection, Float> pair = wire.getSections().get(i);
-
-                        float sectionOffset = wire.getSectionLength() * i;
-                        Vector3f lightPos = blockEntity.getBlockPos().getCenter().toVector3f()
-                                .add(wire.getDirection().mul(sectionOffset))
-                                .add(wire.getUp().mul(pair.getSecond()));
-                        BlockPos lightBlockPos = BlockPos.containing(new Vec3(lightPos));
-                        int block = blockEntity.getLevel().getBrightness(LightLayer.BLOCK, lightBlockPos);
-                        int sky = blockEntity.getLevel().getBrightness(LightLayer.SKY, lightBlockPos);
-
-                        pair.getFirst().render(consumer, poseStack, LightTexture.pack(block, sky), pair.getSecond());
-
-                        poseStack.translate(0.0f, 0.0f, wire.getSectionLength());
-                    }
-
-                    poseStack.popPose();
+                    renderWire(wireItem.getWireType(), poseStack, buffer, blockEntity, targetPos, maxDistance);
                 }
             }
         }
