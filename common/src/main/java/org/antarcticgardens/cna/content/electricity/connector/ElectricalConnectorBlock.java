@@ -45,11 +45,25 @@ public class ElectricalConnectorBlock extends DirectionalBlock implements IBE<El
         if (newState.is(CNABlocks.ELECTRICAL_CONNECTOR.get()))
             return;
 
+        // do not treat sublevel tricks as real block break
+        if (isCapturedBlockChange(level)) {
+            super.onRemove(state, level, pos, newState, movedByPiston);
+            return;
+        }
+
         if (level.getBlockEntity(pos) instanceof ElectricalConnectorBlockEntity connector) {
             connector.remove(level);
         }
 
         super.onRemove(state, level, pos, newState, movedByPiston);
+    }
+
+    private static boolean isCapturedBlockChange(Level level) {
+        try {
+            return Level.class.getField("captureBlockSnapshots").getBoolean(level);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return false;
+        }
     }
 
     @Nullable
